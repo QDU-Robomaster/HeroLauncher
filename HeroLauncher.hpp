@@ -8,7 +8,7 @@ constructor_args:
       trig_gear_ratio: 19.2032
       num_trig_tooth: 6
       speed_sync: false
-  - cmd: '@&cmd'
+  - cmd: '@nullptr'
   - fric_setpoint_speed_0: 3900.0
   - fric_setpoint_speed_1: 2700.0
   - pid_trig_angle:
@@ -59,12 +59,12 @@ constructor_args:
       i_limit: 0.0
       out_limit: 1.0
       cycle: false
-  - fric_motor_0: '@&motor_fric_front_left'
-  - fric_motor_1: '@&motor_fric_front_right'
-  - fric_motor_2: '@&motor_fric_back_left'
-  - fric_motor_3: '@&motor_fric_back_right'
-  - motor_trig_: '@&motor_trig'
-  - referee: '@&ref'
+  - fric_motor_0: '@nullptr'
+  - fric_motor_1: '@nullptr'
+  - fric_motor_2: '@nullptr'
+  - fric_motor_3: '@nullptr'
+  - motor_trig_: '@nullptr'
+  - referee: '@nullptr'
   - thread_priority: LibXR::Thread::Priority::MEDIUM
 template_args: []
 required_hardware:
@@ -73,6 +73,7 @@ depends:
   - qdu-future/RMMotor
   - qdu-future/CMD
   - qdu-future/Referee
+  - qdu-future/Motor
 === END MANIFEST === */
 // clang-format on
 
@@ -189,6 +190,14 @@ class HeroLauncher {
 
     param_fric_target_speed_[0] = fric_setpoint_speed_0;
     param_fric_target_speed_[1] = fric_setpoint_speed_1;
+
+    ASSERT(cmd_ != nullptr);
+    ASSERT(motor_trig_ != nullptr);
+    ASSERT(ref_ != nullptr);
+    ASSERT(fric_motor_[0] != nullptr);
+    ASSERT(fric_motor_[1] != nullptr);
+    ASSERT(fric_motor_[2] != nullptr);
+    ASSERT(fric_motor_[3] != nullptr);
 
     last_wakeup_ = LibXR::Timebase::GetMicroseconds();
 
