@@ -2,77 +2,15 @@
 // clang-format off
 /* === MODULE MANIFEST V2 ===
 module_description: 英雄发射机构独立实现，负责摩擦轮、拨弹盘控制与热量约束发射逻辑
-constructor_args:
-  - task_stack_depth: 1536
-  - launcher_param:
-      trig_gear_ratio: 19.2032
-      num_trig_tooth: 6
-      speed_sync: false
-  - cmd: '@&cmd'
-  - fric_setpoint_speed_0: 3900.0
-  - fric_setpoint_speed_1: 2700.0
-  - pid_trig_angle:
-      k: 1.0
-      p: 2000.0
-      i: 0.0
-      d: 0.0
-      i_limit: 0.0
-      out_limit: 2000.0
-      cycle: true
-  - pid_trig_speed:
-      k: 1.0
-      p: 0.0013
-      i: 0.0
-      d: 0.0
-      i_limit: 1.0
-      out_limit: 1.0
-      cycle: false
-  - pid_fric_speed_0:
-      k: 1.0
-      p: 0.0003
-      i: 0.0
-      d: 0.0
-      i_limit: 0.0
-      out_limit: 1.0
-      cycle: false
-  - pid_fric_speed_1:
-      k: 1.0
-      p: 0.0003
-      i: 0.0
-      d: 0.0
-      i_limit: 0.0
-      out_limit: 1.0
-      cycle: false
-  - pid_fric_speed_2:
-      k: 1.0
-      p: 0.0003
-      i: 0.0
-      d: 0.0
-      i_limit: 0.0
-      out_limit: 1.0
-      cycle: false
-  - pid_fric_speed_3:
-      k: 1.0
-      p: 0.0003
-      i: 0.0
-      d: 0.0
-      i_limit: 0.0
-      out_limit: 1.0
-      cycle: false
-  - fric_motor_0: '@&motor_fric_front_left'
-  - fric_motor_1: '@&motor_fric_front_right'
-  - fric_motor_2: '@&motor_fric_back_left'
-  - fric_motor_3: '@&motor_fric_back_right'
-  - motor_trig_: '@&motor_trig'
-  - referee: '@&ref'
-  - thread_priority: LibXR::Thread::Priority::MEDIUM
-template_args: []
-required_hardware:
-  - motor
 depends:
-  - qdu-future/RMMotor
-  - qdu-future/CMD
-  - qdu-future/Referee
+- id: QDU-Robomaster/RMMotor
+  ref: same-or-dev
+- id: QDU-Robomaster/CMD
+  ref: same-or-dev
+- id: QDU-Robomaster/Referee
+  ref: same-or-dev
+- id: QDU-Robomaster/Motor
+  ref: same-or-dev
 === END MANIFEST === */
 // clang-format on
 
@@ -84,7 +22,6 @@ depends:
 #include "Motor.hpp"
 #include "RMMotor.hpp"
 #include "Referee.hpp"
-#include "app_framework.hpp"
 #include "cycle_value.hpp"
 #include "event.hpp"
 #include "libxr_def.hpp"
@@ -99,26 +36,30 @@ depends:
  * @details 负责摩擦轮、拨弹盘控制与热量约束发射逻辑。
  *          包含完整的线程管理和事件系统，可独立使用。
  */
-class HeroLauncher {
+class HeroLauncher
+{
  public:
   static constexpr int FRIC_NUM = 4;
   static constexpr float TRIG_ZERO_ANGLE_OFFSET = 0.65f;
   static constexpr float TRIG_LOADING_ANGLE_STEP =
       static_cast<float>(LibXR::TWO_PI) / 1000.0f;
 
-  enum class TrigMode : uint8_t {
+  enum class TrigMode : uint8_t
+  {
     RELAX = 0,
     SAFE,
     SINGLE,
     CONTINUE,
   };
 
-  enum class LauncherEvent : uint8_t {
+  enum class LauncherEvent : uint8_t
+  {
     SET_FRICMODE_RELAX,
     SET_FRICMODE_SAFE,
     SET_FRICMODE_READY,
   };
-  struct HeatControl {
+  struct HeatControl
+  {
     float heat;          /* 现在热量水平 */
     float last_heat;     /* 之前的热量水平 */
     float heat_limit;    /* 热量上限 */
@@ -131,15 +72,14 @@ class HeroLauncher {
     uint32_t available_shot; /* 热量范围内还可以发射的数量 */
   };
 
-  struct LauncherParam {
+  struct LauncherParam
+  {
     float trig_gear_ratio;
     uint8_t num_trig_tooth;
     bool speed_sync;
   };
   /**
    * @brief 构造 HeroLauncher
-   * @param hw 硬件容器
-   * @param app 应用管理器
    * @param task_stack_depth 线程栈深
    * @param launcher_param 发射器参数
    * @param cmd CMD 模块指针
@@ -157,11 +97,10 @@ class HeroLauncher {
    * @param thread_priority 线程优先级
    */
   HeroLauncher(
-      LibXR::HardwareContainer& hw, LibXR::ApplicationManager& app,
+
       uint32_t task_stack_depth, LauncherParam launcher_param, CMD* cmd,
       float fric_setpoint_speed_0, float fric_setpoint_speed_1,
-      LibXR::PID<float>::Param pid_trig_angle,
-      LibXR::PID<float>::Param pid_trig_speed,
+      LibXR::PID<float>::Param pid_trig_angle, LibXR::PID<float>::Param pid_trig_speed,
       LibXR::PID<float>::Param pid_fric_speed_0,
       LibXR::PID<float>::Param pid_fric_speed_1,
       LibXR::PID<float>::Param pid_fric_speed_2,
@@ -173,13 +112,13 @@ class HeroLauncher {
         speed_sync_(launcher_param.speed_sync),
         trig_angle_pid_(pid_trig_angle),
         trig_speed_pid_(pid_trig_speed),
-        fric_speed_pid_({{LibXR::PID<float>(pid_fric_speed_0),
-                          LibXR::PID<float>(pid_fric_speed_1),
-                          LibXR::PID<float>(pid_fric_speed_2),
-                          LibXR::PID<float>(pid_fric_speed_3)}}),
+        fric_speed_pid_(
+            {{LibXR::PID<float>(pid_fric_speed_0), LibXR::PID<float>(pid_fric_speed_1),
+              LibXR::PID<float>(pid_fric_speed_2), LibXR::PID<float>(pid_fric_speed_3)}}),
         trig_gear_ratio_(launcher_param.trig_gear_ratio),
         num_trig_tooth_(launcher_param.num_trig_tooth),
-        ref_(ref) {
+        ref_(ref)
+  {
     motor_trig_ = motor_trig;
 
     fric_motor_[0] = fric_motor_0;
@@ -196,7 +135,8 @@ class HeroLauncher {
                    thread_priority);
 
     auto lost_ctrl_callback = LibXR::Callback<uint32_t>::Create(
-        [](bool in_isr, HeroLauncher* self, uint32_t event_id) {
+        [](bool in_isr, HeroLauncher* self, uint32_t event_id)
+        {
           UNUSED(in_isr);
           UNUSED(event_id);
           self->mutex_.Lock();
@@ -206,12 +146,12 @@ class HeroLauncher {
         this);
 
     auto start_ctrl_callback = LibXR::Callback<uint32_t>::Create(
-        [](bool in_isr, HeroLauncher* self, uint32_t event_id) {
+        [](bool in_isr, HeroLauncher* self, uint32_t event_id)
+        {
           UNUSED(in_isr);
           UNUSED(event_id);
           self->mutex_.Lock();
-          self->SetMode(
-              static_cast<uint32_t>(LauncherEvent::SET_FRICMODE_RELAX));
+          self->SetMode(static_cast<uint32_t>(LauncherEvent::SET_FRICMODE_RELAX));
           self->mutex_.Unlock();
         },
         this);
@@ -220,7 +160,8 @@ class HeroLauncher {
     cmd_->GetEvent().Register(CMD::CMD_EVENT_START_CTRL, start_ctrl_callback);
 
     auto event_callback = LibXR::Callback<uint32_t>::Create(
-        [](bool in_isr, HeroLauncher* self, uint32_t event_id) {
+        [](bool in_isr, HeroLauncher* self, uint32_t event_id)
+        {
           UNUSED(in_isr);
           self->mutex_.Lock();
           self->SetMode(event_id);
@@ -243,28 +184,31 @@ class HeroLauncher {
   /**
    * @brief 线程主函数
    */
-  static void ThreadFunc(HeroLauncher* self) {
+  static void ThreadFunc(HeroLauncher* self)
+  {
     LibXR::Topic::ASyncSubscriber<CMD::LauncherCMD> cmd_sub("launcher_cmd");
-    LibXR::Topic::ASyncSubscriber<Referee::LauncherPack> launcher_ref(
-        "launcher_ref");
+    LibXR::Topic::ASyncSubscriber<Referee::LauncherPack> launcher_ref("launcher_ref");
     cmd_sub.StartWaiting();
     launcher_ref.StartWaiting();
 
     self->last_wakeup_time_ = LibXR::Timebase::GetMilliseconds();
     self->last_online_time_ = LibXR::Timebase::GetMicroseconds();
 
-    while (true) {
+    while (true)
+    {
       LibXR::Thread::Sleep(2);
 
       auto now = LibXR::Timebase::GetMicroseconds();
       self->dt_ = (now - self->last_online_time_).ToSecondf();
       self->last_online_time_ = now;
 
-      if (cmd_sub.Available()) {
+      if (cmd_sub.Available())
+      {
         self->launcher_cmd_ = cmd_sub.GetData();
         cmd_sub.StartWaiting();
       }
-      if (launcher_ref.Available()) {
+      if (launcher_ref.Available())
+      {
         self->ref_data_.rs.shooter_cooling_value =
             launcher_ref.GetData().rs.shooter_cooling_value;
         self->ref_data_.rs.shooter_heat_limit =
@@ -372,10 +316,9 @@ class HeroLauncher {
       Motor::MotorCmd{.mode = Motor::ControlMode::MODE_CURRENT,
                       .reduction_ratio = 1.0f,
                       .velocity = 0}};
-  Motor::MotorCmd cmd_trig_ =
-      Motor::MotorCmd{.mode = Motor::ControlMode::MODE_CURRENT,
-                      .reduction_ratio = 19.2032f,
-                      .velocity = 0};
+  Motor::MotorCmd cmd_trig_ = Motor::MotorCmd{.mode = Motor::ControlMode::MODE_CURRENT,
+                                              .reduction_ratio = 19.2032f,
+                                              .velocity = 0};
 
   // 添加线程和事件相关成员
   LibXR::Thread thread_;
@@ -390,18 +333,18 @@ class HeroLauncher {
   LibXR::MillisecondTimestamp last_wakeup_time_ = 0;
   LibXR::MicrosecondTimestamp last_online_time_ = 0;
 
-  LibXR::Timer::TimerHandle
-      ui_timer_handle_;  // 定时器句柄用于定期更新UI（2Hz）
+  LibXR::Timer::TimerHandle ui_timer_handle_;  // 定时器句柄用于定期更新UI（2Hz）
   /*----------工具函数--------------------------------*/
   /**ui
    * @brief 更新电机反馈和状态量不同
    */
-  void Update() {
+  void Update()
+  {
     this->last_wakeup_ = LibXR::Timebase::GetMicroseconds();
 
-    const float LAST_TRIG_MOTOR_ANGLE =
-        LibXR::CycleValue<float>(param_trig_.abs_angle);
-    for (int i = 0; i < FRIC_NUM; i++) {
+    const float LAST_TRIG_MOTOR_ANGLE = LibXR::CycleValue<float>(param_trig_.abs_angle);
+    for (int i = 0; i < FRIC_NUM; i++)
+    {
       fric_motor_[i]->Update();
       param_motor_fric_[i] = fric_motor_[i]->GetFeedback();
     }
@@ -416,7 +359,8 @@ class HeroLauncher {
    * @brief 状态机与热量计算
    * @details 更新热量限制，更新拨弹状态机。
    */
-  void Solve() {
+  void Solve()
+  {
     SoftStart();
     HeatLimit();
     UpdateTrigMode();
@@ -427,18 +371,24 @@ class HeroLauncher {
    * @brief 控制输出
    * @details 拨弹控制、发弹检测和摩擦轮PID输出。
    */
-  void Control() {
-    if (motor_state_ == LibXR::ErrorCode::OK) {
-      if (first_loading_) {
+  void Control()
+  {
+    if (motor_state_ == LibXR::ErrorCode::OK)
+    {
+      if (first_loading_)
+      {
         FirstLoadingControl();
-      } else {
+      }
+      else
+      {
         NormalFireControl();
       }
-      real_launch_delay_ =
-          (finish_fire_time_ - start_fire_time_).ToMillisecond();
+      real_launch_delay_ = (finish_fire_time_ - start_fire_time_).ToMillisecond();
       FricPidControl();
       TrigPidControl();
-    } else {
+    }
+    else
+    {
       Reset();
     }
   }
@@ -447,14 +397,13 @@ class HeroLauncher {
    * @brief 设置发射器模式
    * @param mode 事件ID，对应 LauncherEvent
    */
-  void SetMode(uint32_t mode) {
-    launcher_state_ = static_cast<LauncherEvent>(mode);
-  }
+  void SetMode(uint32_t mode) { launcher_state_ = static_cast<LauncherEvent>(mode); }
 
   /**
    * @brief 失控处理
    */
-  void LostCtrl() {
+  void LostCtrl()
+  {
     // 重置所有发射相关的状态变量到初始模式
     launcher_state_ = LauncherEvent::SET_FRICMODE_RELAX;
     trig_mode_ = TrigMode::RELAX;
@@ -504,7 +453,8 @@ class HeroLauncher {
    * @brief 重置发射器状态
    * @details 将所有发射相关的状态变量、标志位、时间戳和角度值重置到初始状态。
    */
-  void Reset() {
+  void Reset()
+  {
     first_loading_ = true;
     fire_flag_ = false;
     enable_fire_ = false;
@@ -527,7 +477,8 @@ class HeroLauncher {
 
     soft_start_finish_ = false;
 
-    for (int i = 0; i < FRIC_NUM; i++) {
+    for (int i = 0; i < FRIC_NUM; i++)
+    {
       fric_motor_[i]->Relax();
     }
     motor_trig_->Relax();
@@ -536,26 +487,37 @@ class HeroLauncher {
   /**
    * @brief 更新拨弹盘模式
    */
-  void UpdateTrigMode() {
+  void UpdateTrigMode()
+  {
     LibXR::MillisecondTimestamp now_time = LibXR::Timebase::GetMilliseconds();
 
-    if (launcher_state_ != LauncherEvent::SET_FRICMODE_RELAX) {
-      if (launcher_cmd_.isfire && !last_fire_notify_) {
+    if (launcher_state_ != LauncherEvent::SET_FRICMODE_RELAX)
+    {
+      if (launcher_cmd_.isfire && !last_fire_notify_)
+      {
         fire_press_time_ = now_time;
         press_continue_ = false;
         trig_mode_ = TrigMode::SINGLE;
-      } else if (launcher_cmd_.isfire && last_fire_notify_) {
-        if (!press_continue_ && (now_time - fire_press_time_ > 200)) {
+      }
+      else if (launcher_cmd_.isfire && last_fire_notify_)
+      {
+        if (!press_continue_ && (now_time - fire_press_time_ > 200))
+        {
           press_continue_ = true;
         }
-        if (press_continue_) {
+        if (press_continue_)
+        {
           trig_mode_ = TrigMode::CONTINUE;
         }
-      } else {
+      }
+      else
+      {
         trig_mode_ = TrigMode::SAFE;
         press_continue_ = false;
       }
-    } else {
+    }
+    else
+    {
       trig_mode_ = TrigMode::RELAX;
     }
 
@@ -565,8 +527,10 @@ class HeroLauncher {
   /**
    * @brief 根据模式设置摩擦轮目标转速
    */
-  void UpdateFricTarget() {
-    switch (launcher_state_) {
+  void UpdateFricTarget()
+  {
+    switch (launcher_state_)
+    {
       case LauncherEvent::SET_FRICMODE_RELAX:
       case LauncherEvent::SET_FRICMODE_SAFE:
         fric_target_rpm_[0] = 0.0f;
@@ -590,12 +554,16 @@ class HeroLauncher {
   /**
    * @brief 首次发弹标定控制
    */
-  void FirstLoadingControl() {
-    if (trig_mode_ == TrigMode::SINGLE || trig_mode_ == TrigMode::CONTINUE) {
+  void FirstLoadingControl()
+  {
+    if (trig_mode_ == TrigMode::SINGLE || trig_mode_ == TrigMode::CONTINUE)
+    {
       fire_flag_ = true;
     }
-    if (fire_flag_) {
-      if (start_loading_time_ == 0) {
+    if (fire_flag_)
+    {
+      if (start_loading_time_ == 0)
+      {
         start_loading_time_ = LibXR::Timebase::GetMilliseconds();
       }
 
@@ -605,9 +573,11 @@ class HeroLauncher {
       delay_time_++;
     }
 
-    if (soft_start_finish_) {
-      if (std::abs(param_motor_fric_[2].torque) > 0.05) {  // 发弹检测
-        trig_zero_angle_ = trig_angle_;                    // 获取电机当前位置
+    if (soft_start_finish_)
+    {
+      if (std::abs(param_motor_fric_[2].torque) > 0.05)
+      {                                                               // 发弹检测
+        trig_zero_angle_ = trig_angle_;                               // 获取电机当前位置
         trig_setpoint_angle_ = trig_angle_ - TRIG_ZERO_ANGLE_OFFSET;  // 偏移量
 
         fire_flag_ = false;
@@ -624,13 +594,17 @@ class HeroLauncher {
   /**
    * @brief 常规发弹逻辑
    */
-  void NormalFireControl() {
-    if (trig_mode_ == TrigMode::SINGLE) {
+  void NormalFireControl()
+  {
+    if (trig_mode_ == TrigMode::SINGLE)
+    {
       mark_launch_ = false;
-      if (!enable_fire_) {
-        if (heat_ctrl_.available_shot) {
-          trig_setpoint_angle_ -= static_cast<float>(LibXR::TWO_PI) /
-                                  static_cast<float>(num_trig_tooth_);
+      if (!enable_fire_)
+      {
+        if (heat_ctrl_.available_shot)
+        {
+          trig_setpoint_angle_ -=
+              static_cast<float>(LibXR::TWO_PI) / static_cast<float>(num_trig_tooth_);
 
           enable_fire_ = true;
           mark_launch_ = false;
@@ -642,15 +616,17 @@ class HeroLauncher {
     }
 
     // 添加发射超时检测（超过100毫秒未检测到发弹则重置状态）
-    if (start_fire_time_ > 0 && (now_ - start_fire_time_ > 100) &&
-        !mark_launch_) {
+    if (start_fire_time_ > 0 && (now_ - start_fire_time_ > 100) && !mark_launch_)
+    {
       fire_flag_ = false;
       enable_fire_ = false;
       start_fire_time_ = now_;
     }
 
-    if (!mark_launch_) {  // 发弹状态检测
-      if (std::abs(param_motor_fric_[2].torque) > 0.05) {
+    if (!mark_launch_)
+    {  // 发弹状态检测
+      if (std::abs(param_motor_fric_[2].torque) > 0.05)
+      {
         fire_flag_ = false;
 
         fired_++;
@@ -665,10 +641,13 @@ class HeroLauncher {
   /**
    * @brief 摩擦轮PID控制输出
    */
-  void FricPidControl() {
-    if (speed_sync_) {
+  void FricPidControl()
+  {
+    if (speed_sync_)
+    {
       float fric_outputs[FRIC_NUM];
-      for (int i = 0; i < FRIC_NUM; i++) {
+      for (int i = 0; i < FRIC_NUM; i++)
+      {
         fric_outputs[i] = fric_speed_pid_[i].Calculate(
             fric_target_rpm_[i], param_motor_fric_[i].velocity, dt_);
       }
@@ -681,26 +660,25 @@ class HeroLauncher {
       // 后摩擦轮同步控制 (2-3)
       float back_speed_diff =
           param_motor_fric_[2].velocity - param_motor_fric_[3].velocity;
-      float back_sync_output =
-          fric_sync_pid_back_.Calculate(0.0f, back_speed_diff, dt_);
+      float back_sync_output = fric_sync_pid_back_.Calculate(0.0f, back_speed_diff, dt_);
 
       // 将同步输出叠加到各摩擦轮
-      cmd_fric_[0].velocity =
-          fric_outputs[0] + front_sync_output;  // 前左 + 同步输出
-      cmd_fric_[1].velocity =
-          fric_outputs[1] - front_sync_output;  // 前右 - 同步输出
-      cmd_fric_[2].velocity =
-          fric_outputs[2] + back_sync_output;  // 后左 + 同步输出
-      cmd_fric_[3].velocity =
-          fric_outputs[3] - back_sync_output;  // 后右 - 同步输出
-    } else {
-      for (int i = 0; i < FRIC_NUM; i++) {
+      cmd_fric_[0].velocity = fric_outputs[0] + front_sync_output;  // 前左 + 同步输出
+      cmd_fric_[1].velocity = fric_outputs[1] - front_sync_output;  // 前右 - 同步输出
+      cmd_fric_[2].velocity = fric_outputs[2] + back_sync_output;   // 后左 + 同步输出
+      cmd_fric_[3].velocity = fric_outputs[3] - back_sync_output;   // 后右 - 同步输出
+    }
+    else
+    {
+      for (int i = 0; i < FRIC_NUM; i++)
+      {
         cmd_fric_[i].velocity = fric_speed_pid_[i].Calculate(
             fric_target_rpm_[i], param_motor_fric_[i].velocity, dt_);
       }
     }
 
-    for (int i = 0; i < FRIC_NUM; i++) {
+    for (int i = 0; i < FRIC_NUM; i++)
+    {
       fric_motor_[i]->Control(cmd_fric_[i]);
     }
   }
@@ -708,13 +686,15 @@ class HeroLauncher {
   /**
    * @brief 拨弹PID控制输出
    */
-  void TrigPidControl() {
+  void TrigPidControl()
+  {
     trig_setpoint_speed_ =
         trig_angle_pid_.Calculate(trig_setpoint_angle_, trig_angle_, dt_);
 
-    trig_output_ = trig_speed_pid_.Calculate(trig_setpoint_speed_,
-                                             param_trig_.velocity, dt_);
-    switch (trig_mode_) {
+    trig_output_ =
+        trig_speed_pid_.Calculate(trig_setpoint_speed_, param_trig_.velocity, dt_);
+    switch (trig_mode_)
+    {
       case TrigMode::RELAX:
         cmd_trig_.velocity = 0;
         break;
@@ -734,18 +714,24 @@ class HeroLauncher {
    * @details 在摩擦轮启动初期限制 PID 输出，防止电流冲击；
    *          当实际转速达到设定值后解除输出限制。
    */
-  void SoftStart() {
-    if (!soft_start_finish_) {
-      for (LibXR::PID<float>& i : fric_speed_pid_) {
+  void SoftStart()
+  {
+    if (!soft_start_finish_)
+    {
+      for (LibXR::PID<float>& i : fric_speed_pid_)
+      {
         i.SetOutLimit(0.1f);
       }
 
-      if (fric_motor_[0]->GetFeedback().velocity >
-          param_fric_target_speed_[0]) {
+      if (fric_motor_[0]->GetFeedback().velocity > param_fric_target_speed_[0])
+      {
         soft_start_finish_ = true;
       }
-    } else {
-      for (LibXR::PID<float>& i : fric_speed_pid_) {
+    }
+    else
+    {
+      for (LibXR::PID<float>& i : fric_speed_pid_)
+      {
         i.SetOutLimit(1.0f);
       }
     }
@@ -754,33 +740,35 @@ class HeroLauncher {
   /**
    * @brief 热量限制计算
    */
-  void HeatLimit() {
+  void HeatLimit()
+  {
     heat_ctrl_.heat_limit = ref_data_.rs.shooter_heat_limit;
     heat_ctrl_.heat_increase = 100.0f;
     heat_ctrl_.cooling_rate = ref_data_.rs.shooter_cooling_value;
-    if (fired_ >= 1) {
+    if (fired_ >= 1)
+    {
       heat_ctrl_.heat += heat_ctrl_.heat_increase;
       fired_ = 0;
     }
-    heat_ctrl_.heat -=
-        heat_ctrl_.cooling_rate / (1 / dt_);  // 每个控制周期的冷却恢复
+    heat_ctrl_.heat -= heat_ctrl_.cooling_rate / (1 / dt_);  // 每个控制周期的冷却恢复
     heat_ctrl_.heat = std::max(heat_ctrl_.heat, 0.0f);
-    float available_float =
-        (this->heat_ctrl_.heat_limit - this->heat_ctrl_.heat) /
-        this->heat_ctrl_.heat_increase;
+    float available_float = (this->heat_ctrl_.heat_limit - this->heat_ctrl_.heat) /
+                            this->heat_ctrl_.heat_increase;
     heat_ctrl_.available_shot = static_cast<uint32_t>(available_float);
   }
 
   CMD::LauncherCMD launcher_cmd_;  // NOLINT
   Referee::LauncherPack ref_data_{};
 
-  void DrawUI() {
+  void DrawUI()
+  {
     uint16_t robot_id = ref_->GetRobotID();
     uint16_t client_id = ref_->GetClientID(robot_id);
 
     // 首次绘制使用ADD，后续使用MODIFY
     Referee::UIFigureOp ADD_OP = Referee::UIFigureOp::UI_OP_MODIFY;
-    if (this->ui_tick_ % 5 == 0) {
+    if (this->ui_tick_ % 5 == 0)
+    {
       ADD_OP = Referee::UIFigureOp::UI_OP_ADD;
     }
 
@@ -799,8 +787,7 @@ class HeroLauncher {
                             : Referee::UIColor::UI_COLOR_ORANGE;
 
     // 拨弹盘位置计算
-    float trig_pos =
-        LibXR::CycleValue<float>(-this->trig_angle_) / 6.2832f * 360.0f;
+    float trig_pos = LibXR::CycleValue<float>(-this->trig_angle_) / 6.2832f * 360.0f;
     uint16_t arc_mid = static_cast<uint16_t>(trig_pos);
     uint16_t arc_start = static_cast<uint16_t>((arc_mid + 330) % 360);
     uint16_t arc_end = static_cast<uint16_t>((arc_mid + 30) % 360);
@@ -810,41 +797,42 @@ class HeroLauncher {
     auto trig_color = first_loading_ ? Referee::UIColor::UI_COLOR_ORANGE
                                      : Referee::UIColor::UI_COLOR_CYAN;
 
-    switch (ui_step_) {
-      case 0: {
+    switch (ui_step_)
+    {
+      case 0:
+      {
         // 绘制前摩擦轮状态
         Referee::UIFigure2 fig_front{};
         ref_->FillCircle(fig_front.interaction_figure[0], "lfl", ADD_OP,
-                         UI_HERO_LAUNCHER_LAYER, fric_color_0, 4, 1600, 820,
-                         25);
+                         UI_HERO_LAUNCHER_LAYER, fric_color_0, 4, 1600, 820, 25);
         ref_->FillCircle(fig_front.interaction_figure[1], "lfr", ADD_OP,
-                         UI_HERO_LAUNCHER_LAYER, fric_color_1, 4, 1680, 820,
-                         25);
+                         UI_HERO_LAUNCHER_LAYER, fric_color_1, 4, 1680, 820, 25);
         ref_->SendUIFigure2(robot_id, client_id, fig_front);
         this->ui_tick_ += 1;
         break;
       }
-      case 1: {
+      case 1:
+      {
         // 绘制后摩擦轮状态
         Referee::UIFigure2 fig_back{};
         ref_->FillCircle(fig_back.interaction_figure[0], "lbl", ADD_OP,
-                         UI_HERO_LAUNCHER_LAYER, fric_color_2, 4, 1600, 750,
-                         25);
+                         UI_HERO_LAUNCHER_LAYER, fric_color_2, 4, 1600, 750, 25);
         ref_->FillCircle(fig_back.interaction_figure[1], "lbr", ADD_OP,
-                         UI_HERO_LAUNCHER_LAYER, fric_color_3, 4, 1680, 750,
-                         25);
+                         UI_HERO_LAUNCHER_LAYER, fric_color_3, 4, 1680, 750, 25);
         ref_->SendUIFigure2(robot_id, client_id, fig_back);
         break;
       }
-      case 2: {
+      case 2:
+      {
         // 绘制拨弹盘位置
         Referee::UIFigure fig_trig{};
-        ref_->FillArc(fig_trig, "lta", ADD_OP, UI_HERO_LAUNCHER_LAYER,
-                      trig_color, 3, 1640, 640, arc_start, arc_end, 80, 80);
+        ref_->FillArc(fig_trig, "lta", ADD_OP, UI_HERO_LAUNCHER_LAYER, trig_color, 3,
+                      1640, 640, arc_start, arc_end, 80, 80);
         ref_->SendUIFigure(robot_id, client_id, fig_trig);
         break;
       }
-      case 3: {
+      case 3:
+      {
         // 竖直画线 - 主瞄准线
         Referee::UIFigure fig_line{};
         ref_->FillLine(fig_line, "ctrln", ADD_OP, UI_HERO_LAUNCHER_LAYER,
@@ -852,7 +840,8 @@ class HeroLauncher {
         ref_->SendUIFigure(robot_id, client_id, fig_line);
         break;
       }
-      case 4: {
+      case 4:
+      {
         // 水平瞄准线 - 下方第一条
 
         Referee::UIFigure fig_bot2{};
