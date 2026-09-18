@@ -78,61 +78,65 @@ class HeroLauncher
     uint8_t num_trig_tooth;
     bool speed_sync;
   };
+  struct Param
+  {
+    uint32_t task_stack_depth;  ///< 线程栈深
+    LauncherParam launcher_param;  ///< 发射器参数
+    float fric_setpoint_speed_0;  ///< 第一级摩擦轮目标转速
+    float fric_setpoint_speed_1;  ///< 第二级摩擦轮目标转速
+    LibXR::PID<float>::Param pid_trig_angle;
+    LibXR::PID<float>::Param pid_trig_speed;
+    LibXR::PID<float>::Param pid_fric_speed_0;  ///< 摩擦轮0 PID参数
+    LibXR::PID<float>::Param pid_fric_speed_1;  ///< 摩擦轮1 PID参数
+    LibXR::PID<float>::Param pid_fric_speed_2;  ///< 摩擦轮2 PID参数
+    LibXR::PID<float>::Param pid_fric_speed_3;  ///< 摩擦轮3 PID参数
+    LibXR::Thread::Priority thread_priority;  ///< 线程优先级
+  };
+
   /**
    * @brief 构造 HeroLauncher
-   * @param task_stack_depth 线程栈深
-   * @param launcher_param 发射器参数
+   * @param param Value configuration.
    * @param cmd CMD 模块指针
-   * @param fric_setpoint_speed_0 第一级摩擦轮目标转速
-   * @param fric_setpoint_speed_1 第二级摩擦轮目标转速
-   * @param pid_fric_speed_0 摩擦轮0 PID参数
-   * @param pid_fric_speed_1 摩擦轮1 PID参数
-   * @param pid_fric_speed_2 摩擦轮2 PID参数
-   * @param pid_fric_speed_3 摩擦轮3 PID参数
    * @param fric_motor_0 摩擦轮0电机指针
    * @param fric_motor_1 摩擦轮1电机指针
    * @param fric_motor_2 摩擦轮2电机指针
    * @param fric_motor_3 摩擦轮3电机指针
    * @param motor_trig_ 拨弹电机指针
-   * @param thread_priority 线程优先级
    */
   HeroLauncher(
-
-      uint32_t task_stack_depth, LauncherParam launcher_param, CMD* cmd,
-      float fric_setpoint_speed_0, float fric_setpoint_speed_1,
-      LibXR::PID<float>::Param pid_trig_angle, LibXR::PID<float>::Param pid_trig_speed,
-      LibXR::PID<float>::Param pid_fric_speed_0,
-      LibXR::PID<float>::Param pid_fric_speed_1,
-      LibXR::PID<float>::Param pid_fric_speed_2,
-      LibXR::PID<float>::Param pid_fric_speed_3, RMMotor* fric_motor_0,
-      RMMotor* fric_motor_1, RMMotor* fric_motor_2, RMMotor* fric_motor_3,
-      RMMotor* motor_trig, Referee* ref,
-      LibXR::Thread::Priority thread_priority = LibXR::Thread::Priority::MEDIUM)
-      : cmd_(cmd),
-        speed_sync_(launcher_param.speed_sync),
-        trig_angle_pid_(pid_trig_angle),
-        trig_speed_pid_(pid_trig_speed),
+      CMD& cmd,
+      RMMotor& fric_motor_0,
+      RMMotor& fric_motor_1,
+      RMMotor& fric_motor_2,
+      RMMotor& fric_motor_3,
+      RMMotor& motor_trig,
+      Referee& ref,
+      const Param& param = {.task_stack_depth = 1536, .launcher_param = {.trig_gear_ratio = 19.2032f, .num_trig_tooth = 6, .speed_sync = false}, .fric_setpoint_speed_0 = 3900.0f, .fric_setpoint_speed_1 = 2700.0f, .pid_trig_angle = {.k = 1.0f, .p = 2000.0f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 2000.0f, .cycle = true}, .pid_trig_speed = {.k = 1.0f, .p = 0.0013f, .i = 0.0f, .d = 0.0f, .i_limit = 1.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_0 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_1 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_2 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_3 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .thread_priority = LibXR::Thread::Priority::MEDIUM})
+      : cmd_(&cmd),
+        speed_sync_(param.launcher_param.speed_sync),
+        trig_angle_pid_(param.pid_trig_angle),
+        trig_speed_pid_(param.pid_trig_speed),
         fric_speed_pid_(
-            {{LibXR::PID<float>(pid_fric_speed_0), LibXR::PID<float>(pid_fric_speed_1),
-              LibXR::PID<float>(pid_fric_speed_2), LibXR::PID<float>(pid_fric_speed_3)}}),
-        trig_gear_ratio_(launcher_param.trig_gear_ratio),
-        num_trig_tooth_(launcher_param.num_trig_tooth),
-        ref_(ref)
+            {{LibXR::PID<float>(param.pid_fric_speed_0), LibXR::PID<float>(param.pid_fric_speed_1),
+              LibXR::PID<float>(param.pid_fric_speed_2), LibXR::PID<float>(param.pid_fric_speed_3)}}),
+        trig_gear_ratio_(param.launcher_param.trig_gear_ratio),
+        num_trig_tooth_(param.launcher_param.num_trig_tooth),
+        ref_(&ref)
   {
-    motor_trig_ = motor_trig;
+    motor_trig_ = &motor_trig;
 
-    fric_motor_[0] = fric_motor_0;
-    fric_motor_[1] = fric_motor_1;
-    fric_motor_[2] = fric_motor_2;
-    fric_motor_[3] = fric_motor_3;
+    fric_motor_[0] = &fric_motor_0;
+    fric_motor_[1] = &fric_motor_1;
+    fric_motor_[2] = &fric_motor_2;
+    fric_motor_[3] = &fric_motor_3;
 
-    param_fric_target_speed_[0] = fric_setpoint_speed_0;
-    param_fric_target_speed_[1] = fric_setpoint_speed_1;
+    param_fric_target_speed_[0] = param.fric_setpoint_speed_0;
+    param_fric_target_speed_[1] = param.fric_setpoint_speed_1;
 
     last_wakeup_ = LibXR::Timebase::GetMicroseconds();
 
-    thread_.Create(this, ThreadFunc, "HeroLauncherThread", task_stack_depth,
-                   thread_priority);
+    thread_.Create(this, ThreadFunc, "HeroLauncherThread", param.task_stack_depth,
+                   param.thread_priority);
 
     auto lost_ctrl_callback = LibXR::Callback<uint32_t>::Create(
         [](bool in_isr, HeroLauncher* self, uint32_t event_id)
