@@ -230,8 +230,6 @@ class HeroLauncher
 
   LibXR::Event& GetEvent() { return event_; }
 
-  void OnMonitor() {}
-
  private:
   CMD* cmd_;
 
