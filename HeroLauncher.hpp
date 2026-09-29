@@ -91,6 +91,8 @@ class HeroLauncher
     LibXR::PID<float>::Param pid_fric_speed_2;  ///< 摩擦轮2 PID参数
     LibXR::PID<float>::Param pid_fric_speed_3;  ///< 摩擦轮3 PID参数
     LibXR::Thread::Priority thread_priority;  ///< 线程优先级
+    const char* launcher_cmd_topic_name;  ///< 订阅的发射控制命令 Topic 名称
+    const char* launcher_ref_topic_name;  ///< 订阅的裁判系统发射数据 Topic 名称
   };
 
   /**
@@ -111,7 +113,7 @@ class HeroLauncher
       RMMotor& fric_motor_3,
       RMMotor& motor_trig,
       Referee& ref,
-      const Param& param = {.task_stack_depth = 1536, .launcher_param = {.trig_gear_ratio = 19.2032f, .num_trig_tooth = 6, .speed_sync = false}, .fric_setpoint_speed_0 = 3900.0f, .fric_setpoint_speed_1 = 2700.0f, .pid_trig_angle = {.k = 1.0f, .p = 2000.0f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 2000.0f, .cycle = true}, .pid_trig_speed = {.k = 1.0f, .p = 0.0013f, .i = 0.0f, .d = 0.0f, .i_limit = 1.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_0 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_1 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_2 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_3 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .thread_priority = LibXR::Thread::Priority::MEDIUM})
+      const Param& param = {.task_stack_depth = 1536, .launcher_param = {.trig_gear_ratio = 19.2032f, .num_trig_tooth = 6, .speed_sync = false}, .fric_setpoint_speed_0 = 3900.0f, .fric_setpoint_speed_1 = 2700.0f, .pid_trig_angle = {.k = 1.0f, .p = 2000.0f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 2000.0f, .cycle = true}, .pid_trig_speed = {.k = 1.0f, .p = 0.0013f, .i = 0.0f, .d = 0.0f, .i_limit = 1.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_0 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_1 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_2 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_3 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .thread_priority = LibXR::Thread::Priority::MEDIUM, .launcher_cmd_topic_name = "launcher_cmd", .launcher_ref_topic_name = "launcher_ref"})
       : cmd_(&cmd),
         speed_sync_(param.launcher_param.speed_sync),
         trig_angle_pid_(param.pid_trig_angle),
@@ -123,6 +125,8 @@ class HeroLauncher
         num_trig_tooth_(param.launcher_param.num_trig_tooth),
         ref_(&ref)
   {
+    launcher_cmd_topic_name_ = param.launcher_cmd_topic_name;
+    launcher_ref_topic_name_ = param.launcher_ref_topic_name;
     motor_trig_ = &motor_trig;
 
     fric_motor_[0] = &fric_motor_0;
@@ -190,8 +194,9 @@ class HeroLauncher
    */
   static void ThreadFunc(HeroLauncher* self)
   {
-    LibXR::Topic::ASyncSubscriber<CMD::LauncherCMD> cmd_sub("launcher_cmd");
-    LibXR::Topic::ASyncSubscriber<Referee::LauncherPack> launcher_ref("launcher_ref");
+    LibXR::Topic::ASyncSubscriber<CMD::LauncherCMD> cmd_sub(self->launcher_cmd_topic_name_);
+    LibXR::Topic::ASyncSubscriber<Referee::LauncherPack> launcher_ref(
+        self->launcher_ref_topic_name_);
     cmd_sub.StartWaiting();
     launcher_ref.StartWaiting();
 
@@ -323,6 +328,8 @@ class HeroLauncher
                                               .velocity = 0};
 
   // 添加线程和事件相关成员
+  const char* launcher_cmd_topic_name_ = nullptr;
+  const char* launcher_ref_topic_name_ = nullptr;
   LibXR::Thread thread_;
   LibXR::Mutex mutex_;
   LibXR::Event event_;
