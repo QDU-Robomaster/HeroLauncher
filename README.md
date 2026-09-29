@@ -34,8 +34,8 @@ Topic：
 
 | Topic | 方向 | 类型 | 说明 |
 | --- | --- | --- | --- |
-| `launcher_cmd` | 订阅 | `CMD::LauncherCMD` | 发射命令 `isfire` |
-| `launcher_ref` | 订阅 | `Referee::LauncherPack` | 热量上限与冷却值 |
+| `param.launcher_cmd_topic_name`（默认 `launcher_cmd`） | 订阅 | `CMD::LauncherCMD` | 发射命令 `isfire` |
+| `param.launcher_ref_topic_name`（默认 `launcher_ref`） | 订阅 | `Referee::LauncherPack` | 热量上限与冷却值 |
 
 ## 依赖
 
@@ -78,6 +78,10 @@ HeroLauncher(CMD& cmd,
 - `pid_trig_speed`：拨弹速度环，默认 `k = 1, p = 0.0013, i_limit = 1, out_limit = 1`。
 - `pid_fric_speed_0..3`：摩擦轮速度环，默认 `k = 1, p = 0.0003, out_limit = 1`。
 - `thread_priority`：线程优先级，默认 `MEDIUM`。
+- `launcher_cmd_topic_name`：订阅的发射控制命令 Topic，默认 `"launcher_cmd"`，须与 CMD 的
+  `launcher_cmd_topic_name` 一致。
+- `launcher_ref_topic_name`：订阅的裁判系统发射数据 Topic，默认 `"launcher_ref"`，须与
+  Referee 的 `referee_launcher_tp_name` 一致。
 
 ## 使用
 
@@ -159,6 +163,8 @@ modules:
             out_limit: 1.0f
             cycle: 'false'
           thread_priority: LibXR::Thread::Priority::MEDIUM
+          launcher_cmd_topic_name: '"launcher_cmd"'
+          launcher_ref_topic_name: '"launcher_ref"'
 ```
 
 所有依赖都是其他模块实例的 id，须在本实例之前列出：`cmd` 为 `QDU-Robomaster/CMD` 实例，
