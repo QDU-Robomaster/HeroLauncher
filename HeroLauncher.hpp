@@ -32,78 +32,144 @@ depends:
 #define UI_HERO_LAUNCHER_LAYER 2
 
 /**
- * @brief 英雄发射机构独立实现
- * @details 负责摩擦轮、拨弹盘控制与热量约束发射逻辑。
- *          包含完整的线程管理和事件系统，可独立使用。
+ * @brief 英雄机器人发射机构模块：控制四个摩擦轮和一个拨弹盘，按裁判系统热量限制发射。
+ *        Hero robot launcher Module controlling four friction wheels and a trigger
+ *        disc, with firing limited by the referee system heat.
  */
 class HeroLauncher
 {
  public:
+  /// 摩擦轮数量
+  /// Number of friction wheels
   static constexpr int FRIC_NUM = 4;
+
+  /// 首发标定完成后，设定角相对零点的后退量 (rad)
+  /// Setpoint offset behind the zero point after the first-shot calibration (rad)
   static constexpr float TRIG_ZERO_ANGLE_OFFSET = 0.65f;
+
+  /// 首发标定时每周期后退的角度 (rad)
+  /// Angle moved back per cycle during the first-shot calibration (rad)
   static constexpr float TRIG_LOADING_ANGLE_STEP =
       static_cast<float>(LibXR::TWO_PI) / 1000.0f;
 
+  /**
+   * @brief 拨弹模式。
+   *        Trigger modes.
+   */
   enum class TrigMode : uint8_t
   {
-    RELAX = 0,
-    SAFE,
-    SINGLE,
-    CONTINUE,
-  };
-
-  enum class LauncherEvent : uint8_t
-  {
-    SET_FRICMODE_RELAX,
-    SET_FRICMODE_SAFE,
-    SET_FRICMODE_READY,
-  };
-  struct HeatControl
-  {
-    float heat;          /* 现在热量水平 */
-    float last_heat;     /* 之前的热量水平 */
-    float heat_limit;    /* 热量上限 */
-    float speed_limit;   /* 弹丸初速上限 */
-    float cooling_rate;  /* 冷却速率 */
-    float heat_increase; /* 每发热量增加值 */
-
-    uint8_t cooling_acc;  // 冷却增益
-
-    uint32_t available_shot; /* 热量范围内还可以发射的数量 */
-  };
-
-  struct LauncherParam
-  {
-    float trig_gear_ratio;
-    uint8_t num_trig_tooth;
-    bool speed_sync;
-  };
-  struct Param
-  {
-    uint32_t task_stack_depth;  ///< 线程栈深
-    LauncherParam launcher_param;  ///< 发射器参数
-    float fric_setpoint_speed_0;  ///< 第一级摩擦轮目标转速
-    float fric_setpoint_speed_1;  ///< 第二级摩擦轮目标转速
-    LibXR::PID<float>::Param pid_trig_angle;
-    LibXR::PID<float>::Param pid_trig_speed;
-    LibXR::PID<float>::Param pid_fric_speed_0;  ///< 摩擦轮0 PID参数
-    LibXR::PID<float>::Param pid_fric_speed_1;  ///< 摩擦轮1 PID参数
-    LibXR::PID<float>::Param pid_fric_speed_2;  ///< 摩擦轮2 PID参数
-    LibXR::PID<float>::Param pid_fric_speed_3;  ///< 摩擦轮3 PID参数
-    LibXR::Thread::Priority thread_priority;  ///< 线程优先级
-    const char* launcher_cmd_topic_name;  ///< 订阅的发射控制命令 Topic 名称
-    const char* launcher_ref_topic_name;  ///< 订阅的裁判系统发射数据 Topic 名称
+    RELAX = 0,  ///< 放松：拨弹电机输出为 0 Relax: trigger motor output is 0
+    SAFE,       ///< 安全：保持当前设定角 Safe: hold the current setpoint angle
+    SINGLE,     ///< 单发 Single shot
+    CONTINUE,   ///< 持续按下 Fire held
   };
 
   /**
-   * @brief 构造 HeroLauncher
-   * @param param Value configuration.
-   * @param cmd CMD 模块指针
-   * @param fric_motor_0 摩擦轮0电机指针
-   * @param fric_motor_1 摩擦轮1电机指针
-   * @param fric_motor_2 摩擦轮2电机指针
-   * @param fric_motor_3 摩擦轮3电机指针
-   * @param motor_trig_ 拨弹电机指针
+   * @brief 摩擦轮模式事件，数值同时是 `GetEvent()` 上注册的事件 ID。
+   *        Friction wheel mode events; the values are also the event IDs registered on
+   *        `GetEvent()`.
+   */
+  enum class LauncherEvent : uint8_t
+  {
+    SET_FRICMODE_RELAX,  ///< 放松：目标转速为 0，发射状态复位
+                         ///< Relax: target speed 0, launch state reset
+    SET_FRICMODE_SAFE,   ///< 安全：目标转速为 0，发射状态复位
+                         ///< Safe: target speed 0, launch state reset
+    SET_FRICMODE_READY,  ///< 就绪：摩擦轮按目标转速运行
+                         ///< Ready: friction wheels run at the target speed
+  };
+
+  /**
+   * @brief 热量控制状态。
+   *        Heat control state.
+   */
+  struct HeatControl
+  {
+    float heat;           ///< 当前热量 Current heat
+    float last_heat;      ///< 上一次的热量 Previous heat
+    float heat_limit;     ///< 热量上限 Heat limit
+    float speed_limit;    ///< 弹丸初速上限 Projectile speed limit
+    float cooling_rate;   ///< 冷却速率 Cooling rate
+    float heat_increase;  ///< 每发增加的热量 Heat added per round
+
+    uint8_t cooling_acc;  ///< 冷却增益 Cooling gain
+
+    uint32_t available_shot;  ///< 热量范围内还可发射的数量
+                              ///< Number of rounds still available within the heat
+  };
+
+  /**
+   * @brief 发射器参数。
+   *        Launcher parameters.
+   */
+  struct LauncherParam
+  {
+    float trig_gear_ratio;   ///< 拨弹电机减速比 Trigger motor reduction ratio
+    uint8_t num_trig_tooth;  ///< 拨弹盘齿数，即每发转过的格数
+                             ///< Number of trigger disc teeth, the teeth advanced per
+                             ///< round
+    bool speed_sync;         ///< 摩擦轮同步控制开关 Friction wheel synchronization switch
+  };
+
+  /**
+   * @brief 英雄发射机构配置参数。
+   *        Hero launcher configuration parameters.
+   */
+  struct Param
+  {
+    uint32_t task_stack_depth;     ///< 线程栈深
+                                   ///< Thread stack depth
+    LauncherParam launcher_param;  ///< 发射器参数
+                                   ///< Launcher parameters
+    float fric_setpoint_speed_0;   ///< 第一级摩擦轮目标转速 (rpm)
+                                   ///< Target speed of the first-stage friction wheels
+                                   ///< (rpm)
+    float fric_setpoint_speed_1;   ///< 第二级摩擦轮目标转速 (rpm)
+                                   ///< Target speed of the second-stage friction wheels
+                                   ///< (rpm)
+    LibXR::PID<float>::Param pid_trig_angle;    ///< 拨弹角度环 PID
+                                                ///< Trigger angle-loop PID
+    LibXR::PID<float>::Param pid_trig_speed;    ///< 拨弹速度环 PID
+                                                ///< Trigger speed-loop PID
+    LibXR::PID<float>::Param pid_fric_speed_0;  ///< 摩擦轮 0 速度环 PID
+                                                ///< Friction wheel 0 speed-loop PID
+    LibXR::PID<float>::Param pid_fric_speed_1;  ///< 摩擦轮 1 速度环 PID
+                                                ///< Friction wheel 1 speed-loop PID
+    LibXR::PID<float>::Param pid_fric_speed_2;  ///< 摩擦轮 2 速度环 PID
+                                                ///< Friction wheel 2 speed-loop PID
+    LibXR::PID<float>::Param pid_fric_speed_3;  ///< 摩擦轮 3 速度环 PID
+                                                ///< Friction wheel 3 speed-loop PID
+    LibXR::Thread::Priority thread_priority;    ///< 线程优先级
+                                                ///< Thread priority
+    const char* launcher_cmd_topic_name;        ///< 订阅的发射控制命令 Topic 名称
+                                                ///< Name of the subscribed launcher
+                                                ///< command Topic
+    const char* launcher_ref_topic_name;        ///< 订阅的裁判系统发射数据 Topic 名称
+                                                ///< Name of the subscribed referee
+                                                ///< launcher data Topic
+  };
+
+  /**
+   * @brief 构造 HeroLauncher，创建控制线程、UI 定时任务并注册事件。
+   *        Construct HeroLauncher, create the control thread and the UI timer task, and
+   *        register the events.
+   *
+   * @param cmd CMD 实例。
+   *            CMD instance.
+   * @param fric_motor_0 摩擦轮 0 电机。
+   *                     Friction wheel 0 motor.
+   * @param fric_motor_1 摩擦轮 1 电机。
+   *                     Friction wheel 1 motor.
+   * @param fric_motor_2 摩擦轮 2 电机，同时用于出弹检测。
+   *                     Friction wheel 2 motor, also used for round detection.
+   * @param fric_motor_3 摩擦轮 3 电机。
+   *                     Friction wheel 3 motor.
+   * @param motor_trig 拨弹电机。
+   *                   Trigger motor.
+   * @param ref Referee 实例，用于 UI 绘制。
+   *            Referee instance, used for UI drawing.
+   * @param param 配置参数。
+   *              Configuration parameters.
    */
   HeroLauncher(
       CMD& cmd,
@@ -190,7 +256,12 @@ class HeroLauncher
   }
 
   /**
-   * @brief 线程主函数
+   * @brief 控制线程函数：订阅发射命令与裁判系统数据，每 2 ms 执行一轮更新与控制。
+   *        Control thread function that subscribes to the launcher command and the
+   *        referee data and runs one update and control iteration every 2 ms.
+   *
+   * @param self HeroLauncher 实例指针。
+   *             Pointer to the HeroLauncher instance.
    */
   static void ThreadFunc(HeroLauncher* self)
   {
@@ -233,6 +304,14 @@ class HeroLauncher
     }
   }
 
+  /**
+   * @brief 获取发射机构事件对象，`LauncherEvent` 的三个值注册在其上。
+   *        Get the launcher event object on which the three values of `LauncherEvent`
+   *        are registered.
+   *
+   * @return 事件对象的引用。
+   *         Reference to the event object.
+   */
   LibXR::Event& GetEvent() { return event_; }
 
  private:
@@ -345,6 +424,7 @@ class HeroLauncher
   LibXR::Timer::TimerHandle ui_timer_handle_;  // UI 绘制定时器句柄（47 ms）
   /**
    * @brief 更新电机反馈与拨弹盘角度。
+   *        Update the motor feedback and the trigger disc angle.
    */
   void Update()
   {
@@ -364,8 +444,9 @@ class HeroLauncher
   }
 
   /**
-   * @brief 状态机与热量计算
-   * @details 更新热量限制，更新拨弹状态机。
+   * @brief 软启动、热量计算、拨弹状态机与摩擦轮目标更新。
+   *        Soft start, heat calculation, trigger state machine and friction wheel target
+   *        update.
    */
   void Solve()
   {
@@ -376,8 +457,9 @@ class HeroLauncher
   }
 
   /**
-   * @brief 控制输出
-   * @details 拨弹控制、发弹检测和摩擦轮PID输出。
+   * @brief 拨弹控制、出弹检测与摩擦轮、拨弹电机的 PID 输出；拨弹电机更新出错时复位。
+   *        Trigger control, round detection and the PID outputs of the friction wheel and
+   *        trigger motors; reset when the trigger motor update fails.
    */
   void Control()
   {
@@ -402,13 +484,18 @@ class HeroLauncher
   }
 
   /**
-   * @brief 设置发射器模式
-   * @param mode 事件ID，对应 LauncherEvent
+   * @brief 设置摩擦轮模式。
+   *        Set the friction wheel mode.
+   *
+   * @param mode 事件 ID，对应 `LauncherEvent`。
+   *             Event ID, corresponding to `LauncherEvent`.
    */
   void SetMode(uint32_t mode) { launcher_state_ = static_cast<LauncherEvent>(mode); }
 
   /**
-   * @brief 失控处理
+   * @brief 失去控制时复位全部发射状态并切换到 `SET_FRICMODE_RELAX`。
+   *        Reset all launch states and switch to `SET_FRICMODE_RELAX` when control is
+   *        lost.
    */
   void LostCtrl()
   {
@@ -458,8 +545,9 @@ class HeroLauncher
   }
 
   /**
-   * @brief 重置发射器状态
-   * @details 将所有发射相关的状态变量、标志位、时间戳和角度值重置到初始状态。
+   * @brief 复位发射状态变量、标志位、时间戳和角度，并放松全部电机。
+   *        Reset the launch state variables, flags, timestamps and angles, and relax all
+   *        motors.
    */
   void Reset()
   {
@@ -493,7 +581,8 @@ class HeroLauncher
   }
 
   /**
-   * @brief 更新拨弹盘模式
+   * @brief 按发射命令与摩擦轮模式更新拨弹模式。
+   *        Update the trigger mode from the fire command and the friction wheel mode.
    */
   void UpdateTrigMode()
   {
@@ -533,7 +622,8 @@ class HeroLauncher
   }
 
   /**
-   * @brief 根据模式设置摩擦轮目标转速
+   * @brief 按摩擦轮模式设置摩擦轮目标转速。
+   *        Set the friction wheel target speeds from the friction wheel mode.
    */
   void UpdateFricTarget()
   {
@@ -560,7 +650,9 @@ class HeroLauncher
   }
 
   /**
-   * @brief 首次发弹标定控制
+   * @brief 首发标定：拨弹盘后退直到检测到出弹，并记录零点。
+   *        First-shot calibration: move the trigger disc back until a round is detected
+   *        and record the zero point.
    */
   void FirstLoadingControl()
   {
@@ -600,7 +692,8 @@ class HeroLauncher
   }
 
   /**
-   * @brief 常规发弹逻辑
+   * @brief 常规发弹：热量允许时推进一格并检测出弹。
+   *        Normal firing: advance one tooth when heat allows and detect the round.
    */
   void NormalFireControl()
   {
@@ -647,7 +740,9 @@ class HeroLauncher
   }
 
   /**
-   * @brief 摩擦轮PID控制输出
+   * @brief 计算并下发摩擦轮速度环输出，`speed_sync` 为真时叠加同步输出。
+   *        Compute and send the friction wheel speed-loop outputs, adding the
+   *        synchronization output when `speed_sync` is true.
    */
   void FricPidControl()
   {
@@ -692,7 +787,8 @@ class HeroLauncher
   }
 
   /**
-   * @brief 拨弹PID控制输出
+   * @brief 计算并下发拨弹角度环与速度环输出。
+   *        Compute and send the trigger angle-loop and speed-loop outputs.
    */
   void TrigPidControl()
   {
@@ -718,9 +814,9 @@ class HeroLauncher
   }
 
   /**
-   * @brief 摩擦轮软启动控制
-   * @details 在摩擦轮启动初期限制 PID 输出，防止电流冲击；
-   *          当实际转速达到设定值后解除输出限制。
+   * @brief 摩擦轮软启动：转速达到目标前限制 PID 输出，达到后解除限制。
+   *        Friction wheel soft start: limit the PID output until the speed reaches the
+   *        target, then release the limit.
    */
   void SoftStart()
   {
@@ -746,7 +842,8 @@ class HeroLauncher
   }
 
   /**
-   * @brief 热量限制计算
+   * @brief 计算热量并更新可发射数量。
+   *        Compute the heat and update the number of available shots.
    */
   void HeatLimit()
   {
@@ -768,6 +865,10 @@ class HeroLauncher
   CMD::LauncherCMD launcher_cmd_;  // NOLINT
   Referee::LauncherPack ref_data_{};
 
+  /**
+   * @brief 绘制一步裁判系统 UI，五步循环。
+   *        Draw one step of the referee system UI, in a cycle of five steps.
+   */
   void DrawUI()
   {
     uint16_t robot_id = ref_->GetRobotID();
