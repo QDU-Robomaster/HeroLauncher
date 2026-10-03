@@ -1,7 +1,7 @@
 #pragma once
 // clang-format off
 /* === MODULE MANIFEST V2 ===
-module_description: 英雄发射机构独立实现，负责摩擦轮、拨弹盘控制与热量约束发射逻辑
+module_description: 英雄机器人发射机构模块：控制四个摩擦轮和一个拨弹盘，按裁判系统热量限制发射 / Hero robot launcher Module controlling four friction wheels and a trigger disc, with firing limited by the referee system heat
 depends:
 - id: QDU-Robomaster/RMMotor
   ref: same-or-dev
@@ -327,7 +327,7 @@ class HeroLauncher
                                               .reduction_ratio = 19.2032f,
                                               .velocity = 0};
 
-  // 添加线程和事件相关成员
+  // 线程与事件
   const char* launcher_cmd_topic_name_ = nullptr;
   const char* launcher_ref_topic_name_ = nullptr;
   LibXR::Thread thread_;
@@ -342,10 +342,9 @@ class HeroLauncher
   LibXR::MillisecondTimestamp last_wakeup_time_ = 0;
   LibXR::MicrosecondTimestamp last_online_time_ = 0;
 
-  LibXR::Timer::TimerHandle ui_timer_handle_;  // 定时器句柄用于定期更新UI（2Hz）
-  /*----------工具函数--------------------------------*/
-  /**ui
-   * @brief 更新电机反馈和状态量不同
+  LibXR::Timer::TimerHandle ui_timer_handle_;  // UI 绘制定时器句柄（47 ms）
+  /**
+   * @brief 更新电机反馈与拨弹盘角度。
    */
   void Update()
   {
@@ -624,7 +623,7 @@ class HeroLauncher
       }
     }
 
-    // 添加发射超时检测（超过100毫秒未检测到发弹则重置状态）
+    // 发射超时检测：超过 100 ms 未检测到出弹则重置状态
     if (start_fire_time_ > 0 && (now_ - start_fire_time_ > 100) && !mark_launch_)
     {
       fire_flag_ = false;
@@ -781,7 +780,7 @@ class HeroLauncher
       ADD_OP = Referee::UIFigureOp::UI_OP_ADD;
     }
 
-    // 摩擦轮颜色：根据转速判断状态（>5000 RPM为青色，否则为橙色）
+    // 摩擦轮颜色：前两路转速大于 3500 rpm、后两路大于 2200 rpm 为青色，否则为橙色
     auto fric_color_0 = (fabsf(param_motor_fric_[0].velocity) > 3500.0f)
                             ? Referee::UIColor::UI_COLOR_CYAN
                             : Referee::UIColor::UI_COLOR_ORANGE;
@@ -852,7 +851,6 @@ class HeroLauncher
       case 4:
       {
         // 水平瞄准线 - 下方第一条
-
         Referee::UIFigure fig_bot2{};
         ref_->FillLine(fig_bot2, "hlb1", ADD_OP, UI_HERO_LAUNCHER_LAYER,
                        Referee::UIColor::UI_COLOR_WHITE, 2, 940, 300, 980, 300);
@@ -863,6 +861,6 @@ class HeroLauncher
       default:
         break;
     }
-    this->ui_step_ = (this->ui_step_ + 1) % 5;  // 更新为7个case (0-6)
+    this->ui_step_ = (this->ui_step_ + 1) % 5;  // 5 步循环
   }
 };
