@@ -171,22 +171,68 @@ class HeroLauncher
    * @param param 配置参数。
    *              Configuration parameters.
    */
-  HeroLauncher(
-      CMD& cmd,
-      RMMotor& fric_motor_0,
-      RMMotor& fric_motor_1,
-      RMMotor& fric_motor_2,
-      RMMotor& fric_motor_3,
-      RMMotor& motor_trig,
-      Referee& ref,
-      const Param& param = {.task_stack_depth = 1536, .launcher_param = {.trig_gear_ratio = 19.2032f, .num_trig_tooth = 6, .speed_sync = false}, .fric_setpoint_speed_0 = 3900.0f, .fric_setpoint_speed_1 = 2700.0f, .pid_trig_angle = {.k = 1.0f, .p = 2000.0f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 2000.0f, .cycle = true}, .pid_trig_speed = {.k = 1.0f, .p = 0.0013f, .i = 0.0f, .d = 0.0f, .i_limit = 1.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_0 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_1 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_2 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_fric_speed_3 = {.k = 1.0f, .p = 0.0003f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .thread_priority = LibXR::Thread::Priority::MEDIUM, .launcher_cmd_topic_name = "launcher_cmd", .launcher_ref_topic_name = "launcher_ref"})
+  HeroLauncher(CMD& cmd, RMMotor& fric_motor_0, RMMotor& fric_motor_1,
+               RMMotor& fric_motor_2, RMMotor& fric_motor_3, RMMotor& motor_trig,
+               Referee& ref,
+               const Param& param = {.task_stack_depth = 1536,
+                                     .launcher_param = {.trig_gear_ratio = 19.2032f,
+                                                        .num_trig_tooth = 6,
+                                                        .speed_sync = false},
+                                     .fric_setpoint_speed_0 = 3900.0f,
+                                     .fric_setpoint_speed_1 = 2700.0f,
+                                     .pid_trig_angle = {.k = 1.0f,
+                                                        .p = 2000.0f,
+                                                        .i = 0.0f,
+                                                        .d = 0.0f,
+                                                        .i_limit = 0.0f,
+                                                        .out_limit = 2000.0f,
+                                                        .cycle = true},
+                                     .pid_trig_speed = {.k = 1.0f,
+                                                        .p = 0.0013f,
+                                                        .i = 0.0f,
+                                                        .d = 0.0f,
+                                                        .i_limit = 1.0f,
+                                                        .out_limit = 1.0f,
+                                                        .cycle = false},
+                                     .pid_fric_speed_0 = {.k = 1.0f,
+                                                          .p = 0.0003f,
+                                                          .i = 0.0f,
+                                                          .d = 0.0f,
+                                                          .i_limit = 0.0f,
+                                                          .out_limit = 1.0f,
+                                                          .cycle = false},
+                                     .pid_fric_speed_1 = {.k = 1.0f,
+                                                          .p = 0.0003f,
+                                                          .i = 0.0f,
+                                                          .d = 0.0f,
+                                                          .i_limit = 0.0f,
+                                                          .out_limit = 1.0f,
+                                                          .cycle = false},
+                                     .pid_fric_speed_2 = {.k = 1.0f,
+                                                          .p = 0.0003f,
+                                                          .i = 0.0f,
+                                                          .d = 0.0f,
+                                                          .i_limit = 0.0f,
+                                                          .out_limit = 1.0f,
+                                                          .cycle = false},
+                                     .pid_fric_speed_3 = {.k = 1.0f,
+                                                          .p = 0.0003f,
+                                                          .i = 0.0f,
+                                                          .d = 0.0f,
+                                                          .i_limit = 0.0f,
+                                                          .out_limit = 1.0f,
+                                                          .cycle = false},
+                                     .thread_priority = LibXR::Thread::Priority::MEDIUM,
+                                     .launcher_cmd_topic_name = "launcher_cmd",
+                                     .launcher_ref_topic_name = "launcher_ref"})
       : cmd_(&cmd),
         speed_sync_(param.launcher_param.speed_sync),
         trig_angle_pid_(param.pid_trig_angle),
         trig_speed_pid_(param.pid_trig_speed),
-        fric_speed_pid_(
-            {{LibXR::PID<float>(param.pid_fric_speed_0), LibXR::PID<float>(param.pid_fric_speed_1),
-              LibXR::PID<float>(param.pid_fric_speed_2), LibXR::PID<float>(param.pid_fric_speed_3)}}),
+        fric_speed_pid_({{LibXR::PID<float>(param.pid_fric_speed_0),
+                          LibXR::PID<float>(param.pid_fric_speed_1),
+                          LibXR::PID<float>(param.pid_fric_speed_2),
+                          LibXR::PID<float>(param.pid_fric_speed_3)}}),
         trig_gear_ratio_(param.launcher_param.trig_gear_ratio),
         num_trig_tooth_(param.launcher_param.num_trig_tooth),
         ref_(&ref)
@@ -358,10 +404,25 @@ class HeroLauncher
 
   std::array<LibXR::PID<float>, FRIC_NUM> fric_speed_pid_;
 
-  LibXR::PID<float> fric_sync_pid_front_{LibXR::PID<float>::Param{
-      1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, false}};  // 前摩擦轮同步PID (0-1)
-  LibXR::PID<float> fric_sync_pid_back_{LibXR::PID<float>::Param{
-      1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, false}};  // 后摩擦轮同步PID (2-3)
+  // 前摩擦轮同步 PID (0-1)
+  LibXR::PID<float> fric_sync_pid_front_{
+      LibXR::PID<float>::Param{.k = 1.0f,
+                               .p = 0.0f,
+                               .i = 0.0f,
+                               .d = 0.0f,
+                               .i_limit = 0.0f,
+                               .out_limit = 0.5f,
+                               .cycle = false}};
+
+  // 后摩擦轮同步 PID (2-3)
+  LibXR::PID<float> fric_sync_pid_back_{
+      LibXR::PID<float>::Param{.k = 1.0f,
+                               .p = 0.0f,
+                               .i = 0.0f,
+                               .d = 0.0f,
+                               .i_limit = 0.0f,
+                               .out_limit = 0.5f,
+                               .cycle = false}};
 
   float trig_gear_ratio_;
   uint8_t num_trig_tooth_;
