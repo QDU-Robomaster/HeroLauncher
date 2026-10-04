@@ -16,7 +16,7 @@
 
 常规发弹：`SINGLE` 且热量允许时，拨弹盘设定角前进一格（2π / `num_trig_tooth`）；以摩擦轮 2 的 |扭矩| > 0.05 判定出弹并计入热量。拨弹盘角度由电机 `abs_angle` 的增量除以 `trig_gear_ratio` 累加得到。
 
-热量：每判定一发出弹，热量加 100，并按裁判系统 `shooter_cooling_value` 每周期冷却；可发射数为 ⌊(`shooter_heat_limit` − 热量) / 100⌋，为 0 时拨弹盘不再推进。
+热量：每判定一发出弹，热量加 100，并按裁判系统的 `shooter_cooling_value`（每秒冷却值）随时间冷却，每周期减去该值乘以周期时长；可发射数为 ⌊(`shooter_heat_limit` − 热量) / 100⌋，为 0 时拨弹盘不再推进。
 
 `speed_sync` 为 `true` 时，在前（0、1）与后（2、3）两对摩擦轮上叠加同步 PID 的输出。
 
@@ -34,7 +34,7 @@ First-shot calibration: after the first fire command, the trigger disc setpoint 
 
 Normal firing: in `SINGLE` with heat available, the trigger disc setpoint angle advances by one tooth (2π / `num_trig_tooth`); a |torque| of friction wheel 2 above 0.05 is taken as a round leaving and is counted into the heat. The trigger disc angle is accumulated from the increments of the motor `abs_angle` divided by `trig_gear_ratio`.
 
-Heat: each detected round adds 100 to the heat, which cools every cycle by the referee system `shooter_cooling_value`; the number of available shots is ⌊(`shooter_heat_limit` − heat) / 100⌋, and the trigger disc stops advancing when it is 0.
+Heat: each detected round adds 100 to the heat, which cools over time at the referee system `shooter_cooling_value` (cooling per second), subtracting that value multiplied by the cycle time every cycle; the number of available shots is ⌊(`shooter_heat_limit` − heat) / 100⌋, and the trigger disc stops advancing when it is 0.
 
 When `speed_sync` is `true`, the output of a synchronization PID is added on the front pair (0, 1) and the back pair (2, 3) of friction wheels.
 
